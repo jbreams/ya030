@@ -219,7 +219,7 @@ case ps is
         ns      <= cbr3;
 
     when cbr3 =>         
-        rasa        <= '0';                         
+        rasa    <= '0';                         
         cas0a   <= '1';                     -- deassert CAS
         cas1a   <= '1';
         cas2a   <= '1';
