@@ -14,7 +14,7 @@ entity dram_ctrl is port
   reset                 : in    std_logic;                      -- Reset signal
   rw                    : in    std_logic;                      -- Processor Read/Write signal
   siz0, siz1            : in    std_logic;                      -- Data size from CPU
-  pa                    : in    std_logic_vector(28 downto 0);  -- Processor address lines
+  a                     : in    unsigned(28 downto 0);          -- Processor address lines
   rom_oe                : out   std_logic;                      -- Output Enable for ROM SIMM
   edo_inhibit           : out   std_logic;                      -- Inhibits line reads/writes
   dtack                 : out   std_logic;                      -- Data ack signal to CPU
@@ -33,13 +33,9 @@ signal  casa                        : std_logic_vector(3 downto 0);
 signal  dtacka                      : std_logic;
 signal  wea, refacka                : std_logic;
 signal  rom_oea                     : std_logic;
-signal  edo_inhibita                : std_logic;
 
 -- Other internal signals
-signal  a               : std_logic_vector(28 downto 0);  -- Latched address
 signal  ram_base        : std_logic_vector(28 downto 0);
-signal  edocounter      : unsigned(1 downto 0);   -- EDO counter
-signal  edoenabled      : std_logic;                      -- Whether EDO is inabled
 signal  refreq          : std_logic;                      -- Refresh Request
 signal  refcounter      : unsigned(7 downto 0);   -- The refresh counter
 signal  refack          : std_logic;                      -- Refresh acknowledged
@@ -47,7 +43,7 @@ signal  ps, ns          : std_logic_vector(3 downto 0);
 signal  mux, mxs        : std_logic;                      -- Mux signal
 signal  caswr           : std_logic_vector(3 downto 0);   -- CAS vector for write
 signal  rasmux          : std_logic_vector(3 downto 0);   -- RAS bank selector
-signal  rom_cs          : std_logic;
+signal  rom_cs          : boolean;
 
 --state declarations
 constant idle       : std_logic_vector(3 downto 0) := "0000";
@@ -94,7 +90,7 @@ rasmux  <= "0001" when unsigned(a) > rom and unsigned(a) <= bank1 else
            "0000";
 
 -- ROM will be enabled when rom >= a > 0
-rom_cs <= '1' when unsigned(a) <= rom else '0';
+rom_cs <= true when unsigned(a) <= rom else false;
 
 -- Decode size information
 caswr <= "0111" when siz0 = '1' and siz1 = '0' and a(0) = '0' and a(1) = '0' else
@@ -105,13 +101,11 @@ caswr <= "0111" when siz0 = '1' and siz1 = '0' and a(0) = '0' and a(1) = '0' els
          "1100" when siz0 = '0' and siz1 = '1' and a(0) = '0' and a(1) = '1' else
          "0000";
 
-edoenabled <= '1' when siz0 = '0' and siz1 = '0' else '0';
-
 ---------------------------------------
 ------ Asynchronous process -----------
 ---------------------------------------
        
-as_cont: process (refreq, ps, caswr, rasmux, rom_cs)
+as_cont: process (refreq, ps, caswr, rasmux, rom_cs, rw, a)
 begin
 
 case ps is
@@ -123,35 +117,27 @@ case ps is
         mux          <= '0';
         wea          <= '1';
         rom_oea      <= '1';
-        edo_inhibita <= '0';
 
         if (refreq = '1') then 
             ns      <= cbr1;         -- do a refresh cycle
-        elsif (rom_cs = '1') then    -- wait two clock cycles for the ROM to enable
+        elsif (rom_cs) then    -- wait two clock cycles for the ROM to enable
             ns      <= rom_wait1;
             rom_oea <= '0';
-            -- We don't support EDO for reads from ROM
-            if (edoenabled = '1') then
-                edo_inhibita <= '1';
-            end if;
         elsif (rasmux = alloff) then
             ns      <= idle;         -- idle the DRAM
         else
             ns      <= rw1;          -- do a normal read/write cycle
             wea     <= rw;
             mux     <= '1';
-            edocounter <= to_unsigned(0, 2);
-			   -- If EDO is not enabled or if this is the first read in the burst transfer,
-            -- latch the address from the processor
-            if (edoenabled = '0' or edocounter = 0) then
-                a       <= pa;
-            end if;
         end if;
 
     -- ROM is super slow and may take up to three clock cycles for the data to be
     -- put on the data lines, so we have two states that are just here to insert
     -- wait states.
     when rom_wait1 =>
+        refacka <= '0';
+        rasa    <= allon;
+        casa    <= allon;
         ns      <= rom_wait2;
         rom_oea <= '0';
         wea     <= '1';
@@ -159,6 +145,9 @@ case ps is
         mux     <= '0';
 
     when rom_wait2 =>
+        refacka <= '0';
+        rasa    <= allon;
+        casa    <= allon;
         ns      <= idle;
         rom_oea <= '0';
         wea     <= '1';
@@ -168,6 +157,7 @@ case ps is
     when rw1 =>                     -- DRAM access start
         rasa    <= rasmux;
         casa    <= allon;
+        rom_oea <= '1';
         dtacka  <= '1';
         refacka <= '0';
         mux     <= '1';
@@ -177,6 +167,7 @@ case ps is
     when rw1x =>                    -- RAS active
         rasa    <= rasmux;
         casa    <= allon;
+        rom_oea <= '1';
         dtacka  <= '1';
         refacka <= '0';
         mux     <= '0';
@@ -186,6 +177,7 @@ case ps is
     when rw2 =>                     -- dsackx sampled at start of this state
         rasa    <= rasmux;
         casa    <= caswr;           -- CAS active
+        rom_oea <= '1';
         dtacka  <= '0';
         mux     <= '0';
         refacka <= '0';
@@ -195,27 +187,17 @@ case ps is
     when rw3 =>                  -- Read data sampled at start of this state
         rasa    <= allon;
         casa    <= caswr;
+        rom_oea <= '1';
         dtacka  <= '1';
         refacka <= '0';
         mux     <= '0';
         wea     <= '1';
-
-        -- If EDO is not enabled or we've already read a full line (4 bytes) then the next
-        -- state is precharge.
-        if (edoenabled = '0' or edocounter = 3) then
-            ns         <= prechg;
-            edocounter <= to_unsigned(0, 2);
-        else
-        -- Otherwise increment the EDO counter and address by one and go back to rw2. This
-        -- will let us go to the next column with only one clock cycle.
-            edocounter <= edocounter + 1;
-            ns         <= rw2;
-            a          <= a + 4;
-        end if;
+        ns      <= prechg;
          
     when cbr1 =>                 -- CBR mode start
         rasa    <= allon;
         casa    <= alloff;       -- start with CAS
+        rom_oea <= '1';
         dtacka  <= '1';
         refacka <= '1';           --refresh request register clear
         wea     <= '1';           --refresh mode
@@ -225,6 +207,7 @@ case ps is
     when cbr2 =>
         rasa    <= alloff;       -- then RAS
         casa    <= alloff;
+        rom_oea <= '1';
         dtacka  <= '1';
         refacka <= '0';
         wea     <= '1';
@@ -234,6 +217,7 @@ case ps is
     when cbr3 =>
         rasa    <= alloff;
         casa    <= allon;        -- deassert CAS
+        rom_oea <= '1';
         dtacka  <= '1';
         refacka <= '0';
         wea     <= '1';
@@ -243,6 +227,7 @@ case ps is
     when cbr4 =>
         rasa    <= allon;        -- deassert RAS
         casa    <= allon;
+        rom_oea <= '1';
         dtacka  <= '1';
         refacka <= '0';
         wea     <= '1';
@@ -252,6 +237,7 @@ case ps is
     when prechg =>
         rasa    <= allon;
         casa    <= allon;
+        rom_oea <= '1';
         dtacka  <= '1';
         refacka <= '0';
         wea     <= '1';
@@ -260,11 +246,11 @@ case ps is
     when others =>
         rasa    <= allon;
         casa    <= allon;
+        rom_oea <= '1';
         dtacka  <= '1';
         refacka <= '0';
         mux     <= '0';
         rom_oea <= '1';
-        edo_inhibita <= '0';
         wea     <= rw;
         ns      <= idle;
 end case;
@@ -283,9 +269,8 @@ begin
         we         <= '1';
         refack     <= '0';
         rom_oe     <= '1';
-        edo_inhibit <= '0';
+        edo_inhibit <= '1';
     elsif (clk'event and clk = '0') then   -- state machine clocked on falling edge
-
         ps          <= ns;                -- update the state machine state
         ras         <= rasa;
         cas         <= casa;              -- and assert the synchronous outputs
@@ -294,7 +279,7 @@ begin
         refack      <= refacka;
         mxs         <= mux;
         rom_oe      <= rom_oea;
-        edo_inhibit <= edo_inhibita;
+        edo_inhibit <= '1';
     end if;
 end process;
 
