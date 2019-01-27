@@ -5,23 +5,26 @@
 
 library ieee;
 use ieee.std_logic_1164.all;
-use ieee.std_logic_unsigned.all;
 use ieee.numeric_std.all;
 
 entity dram_ctrl is port
 (
-  clk                   : in    std_logic;                      -- Clock
-  reset                 : in    std_logic;                      -- Reset signal
-  rw                    : in    std_logic;                      -- Processor Read/Write signal
-  siz0, siz1            : in    std_logic;                      -- Data size from CPU
-  a                     : in    unsigned(28 downto 0);          -- Processor address lines
-  rom_oe                : out   std_logic;                      -- Output Enable for ROM SIMM
-  edo_inhibit           : out   std_logic;                      -- Inhibits line reads/writes
-  dtack                 : out   std_logic;                      -- Data ack signal to CPU
-  ras                   : out   std_logic_vector(3 downto 0);   -- DRAM RAS signals (banks 1-4)
-  cas                   : out   std_logic_vector(3 downto 0);   -- DRAM CAS signals (columns 1-4)
-  we                    : out   std_logic;                      -- DRAM write enable signal
-  ma                    : out   std_logic_vector(11 downto 0)   -- DRAM address lines
+  clk           : in    std_logic;                      -- Clock
+  reset         : in    std_logic;                      -- Reset signal
+  rw            : in    std_logic;                      -- Processor Read/Write signal
+  dtstart       : in    std_logic;                      -- Signal that a bus transfer has started
+  siz0, siz1    : in    std_logic;                      -- Data size from CPU
+  a             : in    unsigned(28 downto 0);          -- Processor address lines
+  rom_oe        : out   std_logic;                      -- Output Enable for ROM SIMM
+  edo_inhibit   : out   std_logic;                      -- Inhibits line reads/writes
+  dtack         : out   std_logic;                      -- Data ack signal to CPU
+  ras           : out   std_logic_vector(3 downto 0);   -- DRAM RAS signals (banks 1-4)
+  cas           : out   std_logic_vector(3 downto 0);   -- DRAM CAS signals (columns 1-4)
+  we            : out   std_logic;                      -- DRAM write enable signal
+  ma            : out   std_logic_vector(11 downto 0);  -- DRAM address lines
+  aux_addr_out  : out   std_logic_vector(7 downto 0);   -- Decoded addresses for peripherals
+  uart_cs       : out   std_logic;                      -- CS for UART IC (connect to CE2 of TL16C550C)
+  pic_cs        : out   std_logic                       -- CS for PIC CPLD
 );
 end dram_ctrl;
 
@@ -44,6 +47,8 @@ signal  mux, mxs        : std_logic;                      -- Mux signal
 signal  caswr           : std_logic_vector(3 downto 0);   -- CAS vector for write
 signal  rasmux          : std_logic_vector(3 downto 0);   -- RAS bank selector
 signal  rom_cs          : boolean;
+signal  uart_cs_buf     : boolean;
+signal  pic_cs_buf      : boolean;
 
 --state declarations
 constant idle       : std_logic_vector(3 downto 0) := "0000";
@@ -70,6 +75,8 @@ constant bank1    : unsigned := x"8800000";
 constant bank2    : unsigned := x"10800000";
 constant bank3    : unsigned := x"18800000";
 constant bank4    : unsigned := x"20800000";
+constant pic      : unsigned := x"208000ff";
+constant uart     : unsigned := x"20800106";
 
 -- 186hex = 110000110 binary = 390 decimal
 -- assuming 25 MHz clock (40ns clock period)
@@ -92,6 +99,19 @@ rasmux  <= "0001" when unsigned(a) > rom and unsigned(a) <= bank1 else
 -- ROM will be enabled when rom >= a > 0
 rom_cs <= true when unsigned(a) <= rom else false;
 
+-- Decode and drive aux address/cs lines
+pic_cs_buf <= true when dtstart = '1' and unsigned(a) > bank4 and unsigned(a) <= pic
+              else false;
+pic_cs <= '1' when pic_cs_buf else '0';
+-- The UART CS is active when low
+uart_cs_buf <= true when dtstart = '1' and unsigned(a) > pic and unsigned(a) <= uart
+               else false;
+uart_cs <= '0' when pic_cs_buf else '1';
+
+aux_addr_out <= std_logic_vector(resize(unsigned(a) - pic, 8)) when pic_cs_buf else
+                std_logic_vector(resize(unsigned(a) - uart, 8)) when uart_cs_buf else
+                std_logic_vector(to_unsigned(0, 8));
+
 -- Decode size information
 caswr <= "0111" when siz0 = '1' and siz1 = '0' and a(0) = '0' and a(1) = '0' else
          "1011" when siz0 = '1' and siz1 = '0' and a(0) = '0' and a(1) = '1' else
@@ -105,7 +125,7 @@ caswr <= "0111" when siz0 = '1' and siz1 = '0' and a(0) = '0' and a(1) = '0' els
 ------ Asynchronous process -----------
 ---------------------------------------
        
-as_cont: process (refreq, ps, caswr, rasmux, rom_cs, rw, a)
+as_cont: process (refreq, ps, caswr, rasmux, rom_cs, rw, a, dtstart)
 begin
 
 case ps is
@@ -120,12 +140,12 @@ case ps is
 
         if (refreq = '1') then 
             ns      <= cbr1;         -- do a refresh cycle
-        elsif (rom_cs) then    -- wait two clock cycles for the ROM to enable
+        elsif (rom_cs and dtstart = '1') then    -- wait two clock cycles for the ROM to enable
             ns      <= rom_wait1;
             rom_oea <= '0';
         elsif (rasmux = alloff) then
             ns      <= idle;         -- idle the DRAM
-        else
+        elsif (dtstart = '1') then
             ns      <= rw1;          -- do a normal read/write cycle
             wea     <= rw;
             mux     <= '1';
