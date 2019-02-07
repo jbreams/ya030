@@ -12,9 +12,11 @@ end timer_tb;
 architecture tb of timer_tb is
 
     component timer
+        generic (WIDTH: integer;
+                 CLK_PER_PERIOD: integer);
         port (clk   : in std_logic;
               reset : in std_logic;
-              value : in unsigned (31 downto 0);
+              value : in unsigned (WIDTH - 1 downto 0);
               ack   : in std_logic;
               int   : out std_logic);
     end component;
@@ -32,6 +34,7 @@ architecture tb of timer_tb is
 begin
 
     dut : timer
+    generic map (WIDTH => 32, CLK_PER_PERIOD => 1)
     port map (clk   => clk,
               reset => reset,
               value => value,
@@ -75,6 +78,8 @@ begin
         assert int = '0';
 
         ack <= '0';
+        wait for TbPeriod;
+        assert int = '0';
 
         -- Stop the clock and hence terminate the simulation
         TbSimEnded <= '1';
