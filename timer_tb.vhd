@@ -12,8 +12,7 @@ end timer_tb;
 architecture tb of timer_tb is
 
     component timer
-        generic (WIDTH: integer;
-                 CLK_PER_PERIOD: integer);
+        generic (WIDTH: integer);
         port (clk   : in std_logic;
               reset : in std_logic;
               value : in unsigned (WIDTH - 1 downto 0);
@@ -34,7 +33,7 @@ architecture tb of timer_tb is
 begin
 
     dut : timer
-    generic map (WIDTH => 32, CLK_PER_PERIOD => 1)
+    generic map (WIDTH => 32)
     port map (clk   => clk,
               reset => reset,
               value => value,
