@@ -9,7 +9,7 @@ generic (WIDTH: integer;
 port (
     clk : in std_logic;
     reset : in std_logic;
-    period_value : in unsigned(PERIOD_WIDTH - 1 downto 0);
+    period : in unsigned(PERIOD_WIDTH - 1 downto 0);
     value : in unsigned(WIDTH - 1 downto 0);
     ack : in std_logic;
     int : out std_logic
@@ -26,7 +26,6 @@ architecture behavioral of period_timer is
               int   : out std_logic);
     end component;
 
-    signal period : unsigned(PERIOD_WIDTH - 1 downto 0);
     signal period_int : std_logic;
     signal period_ack : std_logic;
 
@@ -41,21 +40,18 @@ begin
               int => period_int);
 
     timer_proc : process(period_int, reset, value, ack) is
-    variable target : unsigned (WIDTH - 1 downto 0) := to_unsigned(0, WIDTH);
-    variable counter : unsigned (WIDTH - 1 downto 0) := to_unsigned(0, WIDTH);
-    variable done : boolean := false;
+        variable counter : unsigned (WIDTH - 1 downto 0) := to_unsigned(0, WIDTH);
+        variable done : boolean := false;
     begin
         if (reset = '1') then
-            target := value;
             counter := to_unsigned(0, WIDTH);
-            period <= period_value;
-            done := false when target /= to_unsigned(0, WIDTH) else true;
+            done := false when value /= to_unsigned(0, WIDTH) else true;
             int <= '0';
         elsif (not done) then
             if (period_int'event and period_int = '1') then
                 counter := counter + 1;
                 period_ack <= '1';
-                if (counter = target) then
+                if (counter = value) then
                     int <= '1';
                     counter := to_unsigned(0, WIDTH);
                     done := true;
@@ -65,7 +61,7 @@ begin
             end if;
         elsif (clk'event) then
             if (clk = '0' and ack = '1') then
-                done := false when target /= to_unsigned(0, WIDTH) else true;
+                done := false when value /= to_unsigned(0, WIDTH) else true;
                 period_ack <= '1';
                 int <= '0';
             end if;

@@ -19,11 +19,9 @@ begin
 
 process(clk, reset, value, ack) is
     variable counter: unsigned(WIDTH - 1 downto 0) := to_unsigned(0, WIDTH);
-    variable target: unsigned(WIDTH - 1 downto 0) := to_unsigned(0, WIDTH);
     variable needs_reset : boolean := true;
 begin
     if (reset = '1') then
-        target := value;
         counter := to_unsigned(0, WIDTH);
         int <= '0';
         needs_reset := false;
@@ -32,9 +30,9 @@ begin
             counter := to_unsigned(0, WIDTH);
             int <= '0';
             needs_reset := false;
-        elsif (target /= 0 and not needs_reset) then
+        elsif (value /= 0 and not needs_reset) then
             counter := counter + 1;
-            if (counter = target) then
+            if (counter = value) then
                 int <= '1';
                 needs_reset := true;
             end if;

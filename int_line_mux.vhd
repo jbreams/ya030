@@ -3,13 +3,15 @@ library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 
-entity int_line_mux is port(
+entity int_line_mux is
+generic (WIDTH : integer := 8);    
+port(
     clk : in std_logic;
     reset : in std_logic;
-    enable : in std_logic_vector(7 downto 0);
+    enable : in std_logic_vector(WIDTH - 1 downto 0);
     clear : in std_logic;
-    int_lines_in : in std_logic_vector(7 downto 0);
-    int_lines_out : out std_logic_vector(7 downto 0);
+    int_lines_in : in std_logic_vector(WIDTH - 1 downto 0);
+    int_lines_out : out std_logic_vector(WIDTH - 1 downto 0);
     int_out : out std_logic);
 end int_line_mux;
 
@@ -25,8 +27,8 @@ component int_line
 end component;
 
 begin
-    int_out <= '0' when int_lines_out = std_logic_vector(to_unsigned(0, 8)) else '1';
-    int_lines : for idx in 7 downto 0 generate
+    int_out <= '0' when int_lines_out = std_logic_vector(to_unsigned(0, WIDTH)) else '1';
+    int_lines : for idx in WIDTH - 1 downto 0 generate
     begin
         cur_int_line : component int_line
             port map(

@@ -16,7 +16,7 @@ architecture tb of period_timer_tb is
                  PERIOD_WIDTH: integer);
         port (clk          : in std_logic;
               reset        : in std_logic;
-              period_value : in unsigned (PERIOD_WIDTH - 1 downto 0);
+              period       : in unsigned (PERIOD_WIDTH - 1 downto 0);
               value        : in unsigned (width - 1 downto 0);
               ack          : in std_logic;
               int          : out std_logic);
@@ -43,7 +43,7 @@ begin
                 PERIOD_WIDTH => 16)
     port map (clk          => clk,
               reset        => reset,
-              period_value => period_value,
+              period       => period_value,
               value        => value,
               ack          => ack,
               int          => int);
